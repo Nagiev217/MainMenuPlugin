@@ -47,16 +47,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 if (player == null) continue;
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
-
                 renderCursor(player, state);
-
-                // Отправляем fix rotation только раз в 20 тиков
-                // чтобы не кикало за флуд
-                state.tickCounter++;
-                if (state.tickCounter >= 20) {
-                    state.tickCounter = 0;
-                    sendFixedRotation(player, state);
-                }
             }
         }, 1L, 1L);
     }
@@ -112,6 +103,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
+        // Блокируем чистую позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -123,6 +115,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // POSITION_LOOK — читаем delta, подменяем всё на фиксированное
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -134,10 +127,18 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
-                event.setCancelled(true);
+
+                // Подменяем позицию и поворот на фиксированные
+                pkt.getDoubles().write(0, state.frozenLocation.getX());
+                pkt.getDoubles().write(1, state.frozenLocation.getY());
+                pkt.getDoubles().write(2, state.frozenLocation.getZ());
+                pkt.getFloat().write(0, FIXED_YAW);
+                pkt.getFloat().write(1, FIXED_PITCH);
+                // Не отменяем — пропускаем с подменёнными значениями
             }
         });
 
+        // LOOK — читаем delta, подменяем yaw/pitch на фиксированные
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -149,10 +150,15 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
-                event.setCancelled(true);
+
+                // Подменяем на фиксированные
+                pkt.getFloat().write(0, FIXED_YAW);
+                pkt.getFloat().write(1, FIXED_PITCH);
+                // Не отменяем — сервер получает фиксированный поворот
             }
         });
 
+        // Блокируем прыжок
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ENTITY_ACTION) {
             @Override
@@ -164,6 +170,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // Левый клик
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
@@ -175,24 +182,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 }
             }
         });
-    }
-
-    private void sendFixedRotation(Player player, CursorState state) {
-        try {
-            PacketContainer packet = pm.createPacket(
-                    PacketType.Play.Server.POSITION);
-
-            packet.getDoubles().write(0, state.frozenLocation.getX());
-            packet.getDoubles().write(1, state.frozenLocation.getY());
-            packet.getDoubles().write(2, state.frozenLocation.getZ());
-            packet.getFloat().write(0, FIXED_YAW);
-            packet.getFloat().write(1, FIXED_PITCH);
-            packet.getIntegers().write(0, 0);
-
-            pm.sendServerPacket(player, packet);
-        } catch (Exception e) {
-            getLogger().warning("Ошибка отправки пакета: " + e.getMessage());
-        }
     }
 
     private void updateCursor(CursorState state, float newYaw, float newPitch) {
