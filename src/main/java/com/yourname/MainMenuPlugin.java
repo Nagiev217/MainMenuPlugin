@@ -15,7 +15,6 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.HashMap;
@@ -39,13 +38,13 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         registerPacketListeners();
 
+        // Только рендер курсора — никаких телепортов
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (UUID uuid : states.keySet()) {
                 Player player = getServer().getPlayer(uuid);
                 if (player == null) continue;
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
-
                 renderCursor(player, state);
             }
         }, 1L, 1L);
@@ -54,32 +53,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         getLogger().info("MainMenuPlugin выключен.");
-    }
-
-    // Главная блокировка движения — через событие
-    @EventHandler
-    public void onMove(PlayerMoveEvent event) {
-        Player player = event.getPlayer();
-        CursorState state = states.get(player.getUniqueId());
-        if (state == null || !state.inMenu) return;
-
-        Location from = event.getFrom();
-        Location to = event.getTo();
-        if (to == null) return;
-
-        // Если изменились XYZ — возвращаем на место
-        // Но оставляем yaw/pitch как есть — не трогаем камеру
-        if (from.getX() != to.getX() ||
-            from.getY() != to.getY() ||
-            from.getZ() != to.getZ()) {
-
-            Location fixed = state.frozenLocation.clone();
-            // Берём yaw/pitch из TO — игрок повернулся, это нормально
-            fixed.setYaw(to.getYaw());
-            fixed.setPitch(to.getPitch());
-            event.setTo(fixed);
-        }
-        // Если изменился только yaw/pitch — пропускаем, не блокируем
     }
 
     @EventHandler
@@ -122,7 +95,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
-        // Блокируем пакет чистой позиции
+        // Блокируем все пакеты с позицией
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -134,7 +107,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // POSITION_LOOK — читаем поворот, блокируем позицию
+        // POSITION_LOOK — читаем только поворот, блокируем позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -147,14 +120,12 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
 
-                // Подменяем только XYZ, yaw/pitch оставляем
-                pkt.getDoubles().write(0, state.frozenLocation.getX());
-                pkt.getDoubles().write(1, state.frozenLocation.getY());
-                pkt.getDoubles().write(2, state.frozenLocation.getZ());
+                // Полностью блокируем — позицию не пропускаем
+                event.setCancelled(true);
             }
         });
 
-        // LOOK — только поворот, просто считываем
+        // LOOK — просто считываем поворот, не блокируем
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -166,6 +137,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
+                // НЕ отменяем — пусть камера крутится свободно
             }
         });
 
@@ -196,7 +168,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void updateCursor(CursorState state, float newYaw, float newPitch) {
-        float dy = newYaw   - state.prevYaw;
+        float dy = newYaw - state.prevYaw;
         float dp = newPitch - state.prevPitch;
 
         if (dy >  180f) dy -= 360f;
