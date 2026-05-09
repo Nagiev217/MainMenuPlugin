@@ -4,6 +4,7 @@ import com.comphenix.protocol.PacketType;
 import com.comphenix.protocol.ProtocolLibrary;
 import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -51,7 +52,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getLogger().info("MainMenuPlugin выключен.");
     }
 
-    // Когда игрок заходит — сразу кидаем его в меню (для теста)
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
@@ -93,5 +93,58 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 }
             }
         });
+
+        // Считываем движение мыши через LOOK пакет
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.LOOK,
+                PacketType.Play.Client.POSITION_LOOK) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state == null || !state.inMenu) return;
+
+                PacketContainer pkt = event.getPacket();
+                float newYaw   = pkt.getFloat().read(0);
+                float newPitch = pkt.getFloat().read(1);
+
+                updateCursor(state, newYaw, newPitch);
+            }
+        });
+
+        // Перехватываем левый клик
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.ARM_ANIMATION) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state != null && state.inMenu) {
+                    event.setCancelled(true);
+                    handleClick(event.getPlayer());
+                }
+            }
+        });
+    }
+
+    private void updateCursor(CursorState state, float newYaw, float newPitch) {
+        float dy = newYaw   - state.prevYaw;
+        float dp = newPitch - state.prevPitch;
+
+        // Нормализуем переход через ±180°
+        if (dy >  180f) dy -= 360f;
+        if (dy < -180f) dy += 360f;
+
+        state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.008f));
+        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.010f));
+
+        state.prevYaw   = newYaw;
+        state.prevPitch = newPitch;
+    }
+
+    private void handleClick(Player player) {
+        CursorState state = states.get(player.getUniqueId());
+        if (state == null) return;
+
+        getLogger().info(player.getName() + " кликнул на X="
+                + state.cursorX + " Y=" + state.cursorY);
     }
 }
