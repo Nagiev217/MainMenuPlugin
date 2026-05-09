@@ -1,6 +1,7 @@
 package com.yourname;
 
 import org.bukkit.Location;
+import org.bukkit.boss.BossBar;
 
 public class CursorState {
     public boolean inMenu = false;
@@ -11,4 +12,5 @@ public class CursorState {
     public float prevPitch = 0f;
     public String hoveredButton = null;
     public int tickCounter = 0;
+    public BossBar bossBar = null;
 }
