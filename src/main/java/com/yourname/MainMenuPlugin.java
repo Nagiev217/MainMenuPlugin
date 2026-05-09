@@ -129,12 +129,11 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         char cursorChar = (char)(CURSOR_BASE + gridY);
         String spaces = SPACES.substring(0, gridX);
 
-        Component msg = Component.text(spaces + cursorChar)
-                .font(Key.key("minecraft", "default"))
-                .color(NamedTextColor.WHITE);
+        // BossBar принимает только String — используем legacy цветовые коды
+        String title = spaces + cursorChar;
 
         if (state.bossBar != null) {
-            state.bossBar.title(msg);
+            state.bossBar.setTitle(title);
         }
     }
 
