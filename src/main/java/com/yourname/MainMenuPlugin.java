@@ -47,7 +47,17 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 if (player == null) continue;
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
+
                 renderCursor(player, state);
+
+                // Лог раз в 40 тиков (2 секунды)
+                state.tickCounter++;
+                if (state.tickCounter >= 40) {
+                    state.tickCounter = 0;
+                    getLogger().info(player.getName()
+                        + " cursor X=" + state.cursorX
+                        + " Y=" + state.cursorY);
+                }
             }
         }, 1L, 1L);
     }
@@ -103,7 +113,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
-        // Блокируем чистую позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -115,7 +124,17 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // POSITION_LOOK — читаем delta, подменяем всё на фиксированное
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.FLYING) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state != null && state.inMenu) {
+                    event.setCancelled(true);
+                }
+            }
+        });
+
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -128,17 +147,14 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
 
-                // Подменяем позицию и поворот на фиксированные
                 pkt.getDoubles().write(0, state.frozenLocation.getX());
                 pkt.getDoubles().write(1, state.frozenLocation.getY());
                 pkt.getDoubles().write(2, state.frozenLocation.getZ());
                 pkt.getFloat().write(0, FIXED_YAW);
                 pkt.getFloat().write(1, FIXED_PITCH);
-                // Не отменяем — пропускаем с подменёнными значениями
             }
         });
 
-        // LOOK — читаем delta, подменяем yaw/pitch на фиксированные
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -151,14 +167,11 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
 
-                // Подменяем на фиксированные
                 pkt.getFloat().write(0, FIXED_YAW);
                 pkt.getFloat().write(1, FIXED_PITCH);
-                // Не отменяем — сервер получает фиксированный поворот
             }
         });
 
-        // Блокируем прыжок
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ENTITY_ACTION) {
             @Override
@@ -170,7 +183,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // Левый клик
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
@@ -191,16 +203,13 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
-        getLogger().info("dp=" + dp + " cursorY before=" + state.cursorY);
-
         state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.002f));
-        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.002f));
-
-        getLogger().info("cursorY after=" + state.cursorY);
+        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.02f));
 
         state.prevYaw   = FIXED_YAW;
         state.prevPitch = FIXED_PITCH;
     }
+
     private void handleClick(Player player) {
         CursorState state = states.get(player.getUniqueId());
         if (state == null) return;
