@@ -27,7 +27,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     private final Map<UUID, CursorState> states = new HashMap<>();
 
     static final int GRID_X = 17;
-    static final int GRID_Y = 9;
+    static final int GRID_Y = 100;
     static final char CURSOR_BASE = '\uE100';
     static final String SPACES = "                 ";
 
