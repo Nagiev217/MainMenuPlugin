@@ -11,6 +11,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.command.CommandExecutor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -41,23 +42,29 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         registerPacketListeners();
 
+        // Команда для дебага
+        getServer().getPluginCommand("cursordebug").setExecutor(
+            (sender, cmd, label, args) -> {
+                if (sender instanceof Player player) {
+                    CursorState state = states.get(player.getUniqueId());
+                    if (state != null) {
+                        player.sendMessage("cursorX=" + state.cursorX
+                            + " cursorY=" + state.cursorY);
+                    } else {
+                        player.sendMessage("Не в меню");
+                    }
+                }
+                return true;
+            }
+        );
+
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (UUID uuid : states.keySet()) {
                 Player player = getServer().getPlayer(uuid);
                 if (player == null) continue;
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
-
                 renderCursor(player, state);
-
-                // Лог раз в 40 тиков (2 секунды)
-                state.tickCounter++;
-                if (state.tickCounter >= 40) {
-                    state.tickCounter = 0;
-                    getLogger().info(player.getName()
-                        + " cursor X=" + state.cursorX
-                        + " Y=" + state.cursorY);
-                }
             }
         }, 1L, 1L);
     }
