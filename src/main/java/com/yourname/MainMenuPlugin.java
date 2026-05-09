@@ -6,6 +6,8 @@ import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.entity.Player;
@@ -23,6 +25,21 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     private ProtocolManager pm;
     private final Map<UUID, CursorState> states = new HashMap<>();
 
+    // Сетка позиций курсора
+    // 17 позиций по X (горизонталь)
+    // 9 позиций по Y (вертикаль) — соответствует символам \uE100..\uE108
+    static final int GRID_X = 17;
+    static final int GRID_Y = 9;
+
+    // Символы вертикальных позиций курсора
+    // \uE100 = верх, \uE108 = низ
+    static final char CURSOR_BASE = '\uE100';
+
+    // Символы для горизонтального сдвига
+    // Используем пробелы разной ширины через отрицательный advance
+    // В MVP используем обычные пробелы для сдвига вправо
+    static final String SPACES = "                 "; // 17 пробелов
+
     @Override
     public void onEnable() {
         getLogger().info("MainMenuPlugin включён!");
@@ -37,10 +54,14 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
 
+                // Замораживаем позицию
                 Location frozen = state.frozenLocation.clone();
                 frozen.setYaw(player.getLocation().getYaw());
                 frozen.setPitch(player.getLocation().getPitch());
                 player.teleport(frozen);
+
+                // Рендерим курсор
+                renderCursor(player, state);
             }
         }, 1L, 1L);
     }
@@ -67,14 +88,30 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
 
         player.setGameMode(GameMode.ADVENTURE);
         player.setWalkSpeed(0f);
-        getLogger().info(player.getName() + " вошёл в меню");
     }
 
     public void exitMenu(Player player) {
         states.remove(player.getUniqueId());
         player.setWalkSpeed(0.2f);
         player.setGameMode(GameMode.SURVIVAL);
-        getLogger().info(player.getName() + " вышел из меню");
+    }
+
+    private void renderCursor(Player player, CursorState state) {
+        // Переводим float [0..1] в индексы сетки
+        int gridX = (int)(state.cursorX * (GRID_X - 1));
+        int gridY = (int)(state.cursorY * (GRID_Y - 1));
+
+        // Символ курсора для данной вертикальной позиции
+        char cursorChar = (char)(CURSOR_BASE + gridY);
+
+        // Горизонтальный сдвиг через пробелы
+        String spaces = SPACES.substring(0, gridX);
+
+        // Строим компонент для action bar
+        Component msg = Component.text(spaces + cursorChar)
+                .color(NamedTextColor.WHITE);
+
+        player.sendActionBar(msg);
     }
 
     private void registerPacketListeners() {
@@ -99,7 +136,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 if (state == null || !state.inMenu) return;
 
                 PacketContainer pkt = event.getPacket();
-
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
@@ -156,7 +192,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     private void handleClick(Player player) {
         CursorState state = states.get(player.getUniqueId());
         if (state == null) return;
-
         getLogger().info(player.getName() + " кликнул на X="
                 + state.cursorX + " Y=" + state.cursorY);
     }
