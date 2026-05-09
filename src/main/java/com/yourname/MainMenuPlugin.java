@@ -174,6 +174,8 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
+        getLogger().info("dy=" + dy + " dp=" + dp + " cursorY=" + state.cursorY);
+
         state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.002f));
         state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.008f));
 
