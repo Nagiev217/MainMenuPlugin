@@ -10,9 +10,5 @@ public class CursorState {
     public float prevYaw = 0f;
     public float prevPitch = 0f;
     public String hoveredButton = null;
-    
-    // Текущий yaw/pitch который мы сами храним
-    // чтобы телепорт не сбивал считывание
-    public float currentYaw = 0f;
-    public float currentPitch = 0f;
+    public int tickCounter = 0;
 }
