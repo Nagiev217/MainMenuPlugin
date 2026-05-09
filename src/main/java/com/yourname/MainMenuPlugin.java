@@ -6,6 +6,7 @@ import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
+import com.comphenix.protocol.reflect.StructureModifier;
 import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -31,6 +32,10 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     static final char CURSOR_BASE = '\uE100';
     static final String SPACES = "                 ";
 
+    // Фиксированный угол камеры — смотрим прямо
+    static final float FIXED_YAW = 0f;
+    static final float FIXED_PITCH = 0f;
+
     @Override
     public void onEnable() {
         getLogger().info("MainMenuPlugin включён!");
@@ -38,7 +43,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         registerPacketListeners();
 
-        // Только рендер курсора — никаких телепортов
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (UUID uuid : states.keySet()) {
                 Player player = getServer().getPlayer(uuid);
@@ -66,12 +70,18 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         state.frozenLocation = player.getLocation().clone();
         state.cursorX = 0.5f;
         state.cursorY = 0.5f;
-        state.prevYaw = player.getLocation().getYaw();
-        state.prevPitch = player.getLocation().getPitch();
+        state.prevYaw = FIXED_YAW;
+        state.prevPitch = FIXED_PITCH;
         states.put(player.getUniqueId(), state);
 
         player.setGameMode(GameMode.ADVENTURE);
         player.setWalkSpeed(0f);
+
+        // Телепортируем на фиксированный угол сразу
+        Location loc = player.getLocation().clone();
+        loc.setYaw(FIXED_YAW);
+        loc.setPitch(FIXED_PITCH);
+        player.teleport(loc);
     }
 
     public void exitMenu(Player player) {
@@ -95,7 +105,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
-        // Блокируем все пакеты с позицией
+        // Блокируем чистую позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -107,7 +117,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // POSITION_LOOK — читаем только поворот, блокируем позицию
+        // POSITION_LOOK — читаем delta, блокируем
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -120,12 +130,15 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
 
-                // Полностью блокируем — позицию не пропускаем
+                // Блокируем пакет — позиция и поворот не меняются
                 event.setCancelled(true);
+
+                // Отправляем серверный пакет чтобы зафиксировать камеру
+                sendFixedRotation(event.getPlayer(), state);
             }
         });
 
-        // LOOK — просто считываем поворот, не блокируем
+        // LOOK — читаем delta, блокируем поворот
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -137,7 +150,12 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
                 updateCursor(state, newYaw, newPitch);
-                // НЕ отменяем — пусть камера крутится свободно
+
+                // Блокируем поворот
+                event.setCancelled(true);
+
+                // Возвращаем камеру на фиксированный угол
+                sendFixedRotation(event.getPlayer(), state);
             }
         });
 
@@ -167,20 +185,42 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         });
     }
 
+    // Отправляем клиенту пакет который фиксирует камеру на FIXED_YAW/FIXED_PITCH
+    private void sendFixedRotation(Player player, CursorState state) {
+        try {
+            PacketContainer packet = pm.createPacket(
+                    PacketType.Play.Server.POSITION);
+
+            packet.getDoubles().write(0, state.frozenLocation.getX());
+            packet.getDoubles().write(1, state.frozenLocation.getY());
+            packet.getDoubles().write(2, state.frozenLocation.getZ());
+            packet.getFloat().write(0, FIXED_YAW);
+            packet.getFloat().write(1, FIXED_PITCH);
+            // Flags = 0 означает абсолютные координаты
+            packet.getIntegers().write(0, 0);
+
+            pm.sendServerPacket(player, packet);
+        } catch (Exception e) {
+            getLogger().warning("Ошибка отправки пакета: " + e.getMessage());
+        }
+    }
+
     private void updateCursor(CursorState state, float newYaw, float newPitch) {
-        float dy = newYaw - state.prevYaw;
+        // prevYaw/prevPitch теперь всегда FIXED угол
+        // потому что мы постоянно сбрасываем камеру туда
+        float dy = newYaw   - state.prevYaw;
         float dp = newPitch - state.prevPitch;
 
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
-        getLogger().info("dy=" + dy + " dp=" + dp + " cursorY=" + state.cursorY);
+        state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy   * 0.002f));
+        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp   * 0.0008f));
 
-        state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.002f));
-        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.008f));
-
-        state.prevYaw   = newYaw;
-        state.prevPitch = newPitch;
+        // Сбрасываем prev на фиксированный угол
+        // чтобы следующая delta считалась от него
+        state.prevYaw   = FIXED_YAW;
+        state.prevPitch = FIXED_PITCH;
     }
 
     private void handleClick(Player player) {
