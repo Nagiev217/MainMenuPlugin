@@ -191,13 +191,16 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
+        getLogger().info("dp=" + dp + " cursorY before=" + state.cursorY);
+
         state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.002f));
         state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.002f));
+
+        getLogger().info("cursorY after=" + state.cursorY);
 
         state.prevYaw   = FIXED_YAW;
         state.prevPitch = FIXED_PITCH;
     }
-
     private void handleClick(Player player) {
         CursorState state = states.get(player.getUniqueId());
         if (state == null) return;
