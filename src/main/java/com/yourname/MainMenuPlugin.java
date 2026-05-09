@@ -15,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.HashMap;
@@ -45,14 +46,15 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
 
-                // Телепортируем только если реально сдвинулся
+                // Жёстко телепортируем каждый тик обратно
+                // но сохраняем yaw/pitch чтобы не сбивать считывание мыши
                 Location current = player.getLocation();
                 Location frozen = state.frozenLocation.clone();
-                if (current.distanceSquared(frozen) > 0.01) {
-                    frozen.setYaw(current.getYaw());
-                    frozen.setPitch(current.getPitch());
-                    player.teleport(frozen);
-                }
+                frozen.setYaw(current.getYaw());
+                frozen.setPitch(current.getPitch());
+
+                // Телепортируем всегда — это фиксит прыжок
+                player.teleport(frozen);
 
                 renderCursor(player, state);
             }
@@ -62,6 +64,30 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         getLogger().info("MainMenuPlugin выключен.");
+    }
+
+    // Дополнительная блокировка через событие движения
+    @EventHandler
+    public void onMove(PlayerMoveEvent event) {
+        Player player = event.getPlayer();
+        CursorState state = states.get(player.getUniqueId());
+        if (state == null || !state.inMenu) return;
+
+        // Если изменились XYZ — отменяем
+        Location from = event.getFrom();
+        Location to = event.getTo();
+        if (to == null) return;
+
+        if (from.getX() != to.getX() ||
+            from.getY() != to.getY() ||
+            from.getZ() != to.getZ()) {
+
+            // Разрешаем только поворот камеры — возвращаем на замороженную позицию
+            Location fixed = state.frozenLocation.clone();
+            fixed.setYaw(to.getYaw());
+            fixed.setPitch(to.getPitch());
+            event.setTo(fixed);
+        }
     }
 
     @EventHandler
@@ -81,6 +107,8 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
 
         player.setGameMode(GameMode.ADVENTURE);
         player.setWalkSpeed(0f);
+        player.setAllowFlight(false);
+        player.setFlySpeed(0f);
     }
 
     public void exitMenu(Player player) {
@@ -104,6 +132,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
+        // Блокируем позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -115,6 +144,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // POSITION_LOOK — читаем поворот, подменяем позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -133,6 +163,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // LOOK — только поворот
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -147,6 +178,31 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // Блокируем прыжок и действия
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.ENTITY_ACTION) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state != null && state.inMenu) {
+                    event.setCancelled(true);
+                }
+            }
+        });
+
+        // Блокируем WASD через vehicle steering
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.STEER_VEHICLE) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state != null && state.inMenu) {
+                    event.setCancelled(true);
+                }
+            }
+        });
+
+        // Блокируем левый клик — обрабатываем сами
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
@@ -167,11 +223,8 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
-        // ВРЕМЕННЫЙ ЛОГ
-        getLogger().info("dy=" + dy + " dp=" + dp);
-
-        state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.008f));
-        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.010f));
+        state.cursorX = Math.max(0f, Math.min(1f, state.cursorX + dy * 0.002f));
+        state.cursorY = Math.max(0f, Math.min(1f, state.cursorY + dp * 0.008f));
 
         state.prevYaw   = newYaw;
         state.prevPitch = newPitch;
