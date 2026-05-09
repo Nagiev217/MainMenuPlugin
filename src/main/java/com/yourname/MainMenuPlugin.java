@@ -30,7 +30,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         registerPacketListeners();
 
-        // Тик каждую секунду — замораживаем позицию
         getServer().getScheduler().runTaskTimer(this, () -> {
             for (UUID uuid : states.keySet()) {
                 Player player = getServer().getPlayer(uuid);
@@ -38,7 +37,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
 
-                // Телепортируем обратно, но сохраняем yaw/pitch
                 Location frozen = state.frozenLocation.clone();
                 frozen.setYaw(player.getLocation().getYaw());
                 frozen.setPitch(player.getLocation().getPitch());
@@ -54,8 +52,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        enterMenu(player);
+        enterMenu(event.getPlayer());
     }
 
     public void enterMenu(Player player) {
@@ -81,10 +78,9 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
-        // Блокируем движение
+        // Блокируем ТОЛЬКО позицию
         pm.addPacketListener(new PacketAdapter(this,
-                PacketType.Play.Client.POSITION,
-                PacketType.Play.Client.POSITION_LOOK) {
+                PacketType.Play.Client.POSITION) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
                 CursorState state = states.get(event.getPlayer().getUniqueId());
@@ -94,10 +90,29 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // Считываем движение мыши через LOOK пакет
+        // POSITION_LOOK — читаем поворот, подменяем позицию
         pm.addPacketListener(new PacketAdapter(this,
-                PacketType.Play.Client.LOOK,
                 PacketType.Play.Client.POSITION_LOOK) {
+            @Override
+            public void onPacketReceiving(PacketEvent event) {
+                CursorState state = states.get(event.getPlayer().getUniqueId());
+                if (state == null || !state.inMenu) return;
+
+                PacketContainer pkt = event.getPacket();
+
+                float newYaw   = pkt.getFloat().read(0);
+                float newPitch = pkt.getFloat().read(1);
+                updateCursor(state, newYaw, newPitch);
+
+                pkt.getDoubles().write(0, state.frozenLocation.getX());
+                pkt.getDoubles().write(1, state.frozenLocation.getY());
+                pkt.getDoubles().write(2, state.frozenLocation.getZ());
+            }
+        });
+
+        // LOOK — только поворот
+        pm.addPacketListener(new PacketAdapter(this,
+                PacketType.Play.Client.LOOK) {
             @Override
             public void onPacketReceiving(PacketEvent event) {
                 CursorState state = states.get(event.getPlayer().getUniqueId());
@@ -106,12 +121,11 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 PacketContainer pkt = event.getPacket();
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
-
                 updateCursor(state, newYaw, newPitch);
             }
         });
 
-        // Перехватываем левый клик
+        // Левый клик
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
@@ -129,7 +143,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         float dy = newYaw   - state.prevYaw;
         float dp = newPitch - state.prevPitch;
 
-        // Нормализуем переход через ±180°
         if (dy >  180f) dy -= 360f;
         if (dy < -180f) dy += 360f;
 
