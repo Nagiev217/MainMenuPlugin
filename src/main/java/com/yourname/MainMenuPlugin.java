@@ -6,6 +6,7 @@ import com.comphenix.protocol.ProtocolManager;
 import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
+import net.kyori.adventure.key.Key;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.GameMode;
@@ -25,19 +26,9 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     private ProtocolManager pm;
     private final Map<UUID, CursorState> states = new HashMap<>();
 
-    // Сетка позиций курсора
-    // 17 позиций по X (горизонталь)
-    // 9 позиций по Y (вертикаль) — соответствует символам \uE100..\uE108
     static final int GRID_X = 17;
     static final int GRID_Y = 9;
-
-    // Символы вертикальных позиций курсора
-    // \uE100 = верх, \uE108 = низ
     static final char CURSOR_BASE = '\uE100';
-
-    // Символы для горизонтального сдвига
-    // Используем пробелы разной ширины через отрицательный advance
-    // В MVP используем обычные пробелы для сдвига вправо
     static final String SPACES = "                 "; // 17 пробелов
 
     @Override
@@ -54,13 +45,15 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
 
-                // Замораживаем позицию
+                // Телепортируем только если реально сдвинулся
+                Location current = player.getLocation();
                 Location frozen = state.frozenLocation.clone();
-                frozen.setYaw(player.getLocation().getYaw());
-                frozen.setPitch(player.getLocation().getPitch());
-                player.teleport(frozen);
+                if (current.distanceSquared(frozen) > 0.01) {
+                    frozen.setYaw(current.getYaw());
+                    frozen.setPitch(current.getPitch());
+                    player.teleport(frozen);
+                }
 
-                // Рендерим курсор
                 renderCursor(player, state);
             }
         }, 1L, 1L);
@@ -97,25 +90,20 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void renderCursor(Player player, CursorState state) {
-        // Переводим float [0..1] в индексы сетки
         int gridX = (int)(state.cursorX * (GRID_X - 1));
         int gridY = (int)(state.cursorY * (GRID_Y - 1));
 
-        // Символ курсора для данной вертикальной позиции
         char cursorChar = (char)(CURSOR_BASE + gridY);
-
-        // Горизонтальный сдвиг через пробелы
         String spaces = SPACES.substring(0, gridX);
 
-        // Строим компонент для action bar
         Component msg = Component.text(spaces + cursorChar)
+                .font(Key.key("minecraft", "default"))
                 .color(NamedTextColor.WHITE);
 
         player.sendActionBar(msg);
     }
 
     private void registerPacketListeners() {
-        // Блокируем ТОЛЬКО позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -127,7 +115,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // POSITION_LOOK — читаем поворот, подменяем позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -146,7 +133,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // LOOK — только поворот
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -161,7 +147,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
-        // Левый клик
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
