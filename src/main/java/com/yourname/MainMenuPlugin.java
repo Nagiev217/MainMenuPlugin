@@ -11,7 +11,9 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.command.CommandExecutor;
+import org.bukkit.boss.BarColor;
+import org.bukkit.boss.BarStyle;
+import org.bukkit.boss.BossBar;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -42,7 +44,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         registerPacketListeners();
 
-        // Команда для дебага
         getServer().getPluginCommand("cursordebug").setExecutor(
             (sender, cmd, label, args) -> {
                 if (sender instanceof Player player) {
@@ -71,6 +72,12 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        // Убираем все boss bar при выключении
+        for (CursorState state : states.values()) {
+            if (state.bossBar != null) {
+                state.bossBar.removeAll();
+            }
+        }
         getLogger().info("MainMenuPlugin выключен.");
     }
 
@@ -88,6 +95,13 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         state.prevYaw = FIXED_YAW;
         state.prevPitch = FIXED_PITCH;
         state.tickCounter = 0;
+
+        BossBar bar = getServer().createBossBar("", BarColor.WHITE, BarStyle.SOLID);
+        bar.addPlayer(player);
+        bar.setVisible(true);
+        bar.setProgress(0.0);
+        state.bossBar = bar;
+
         states.put(player.getUniqueId(), state);
 
         player.setGameMode(GameMode.ADVENTURE);
@@ -100,7 +114,10 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     public void exitMenu(Player player) {
-        states.remove(player.getUniqueId());
+        CursorState state = states.remove(player.getUniqueId());
+        if (state != null && state.bossBar != null) {
+            state.bossBar.removeAll();
+        }
         player.setWalkSpeed(0.2f);
         player.setGameMode(GameMode.SURVIVAL);
     }
@@ -116,7 +133,9 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 .font(Key.key("minecraft", "default"))
                 .color(NamedTextColor.WHITE);
 
-        player.sendActionBar(msg);
+        if (state.bossBar != null) {
+            state.bossBar.title(msg);
+        }
     }
 
     private void registerPacketListeners() {
