@@ -46,13 +46,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 CursorState state = states.get(uuid);
                 if (!state.inMenu) continue;
 
-                // Телепортируем на замороженную позицию
-                // НО yaw/pitch берём из нашего state, не от игрока
-                Location frozen = state.frozenLocation.clone();
-                frozen.setYaw(state.currentYaw);
-                frozen.setPitch(state.currentPitch);
-                player.teleport(frozen);
-
                 renderCursor(player, state);
             }
         }, 1L, 1L);
@@ -63,19 +56,30 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         getLogger().info("MainMenuPlugin выключен.");
     }
 
+    // Главная блокировка движения — через событие
     @EventHandler
     public void onMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
         CursorState state = states.get(player.getUniqueId());
         if (state == null || !state.inMenu) return;
 
+        Location from = event.getFrom();
         Location to = event.getTo();
         if (to == null) return;
 
-        Location fixed = state.frozenLocation.clone();
-        fixed.setYaw(to.getYaw());
-        fixed.setPitch(to.getPitch());
-        event.setTo(fixed);
+        // Если изменились XYZ — возвращаем на место
+        // Но оставляем yaw/pitch как есть — не трогаем камеру
+        if (from.getX() != to.getX() ||
+            from.getY() != to.getY() ||
+            from.getZ() != to.getZ()) {
+
+            Location fixed = state.frozenLocation.clone();
+            // Берём yaw/pitch из TO — игрок повернулся, это нормально
+            fixed.setYaw(to.getYaw());
+            fixed.setPitch(to.getPitch());
+            event.setTo(fixed);
+        }
+        // Если изменился только yaw/pitch — пропускаем, не блокируем
     }
 
     @EventHandler
@@ -91,8 +95,6 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
         state.cursorY = 0.5f;
         state.prevYaw = player.getLocation().getYaw();
         state.prevPitch = player.getLocation().getPitch();
-        state.currentYaw = player.getLocation().getYaw();
-        state.currentPitch = player.getLocation().getPitch();
         states.put(player.getUniqueId(), state);
 
         player.setGameMode(GameMode.ADVENTURE);
@@ -120,6 +122,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
     }
 
     private void registerPacketListeners() {
+        // Блокируем пакет чистой позиции
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION) {
             @Override
@@ -131,6 +134,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // POSITION_LOOK — читаем поворот, блокируем позицию
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.POSITION_LOOK) {
             @Override
@@ -141,21 +145,16 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 PacketContainer pkt = event.getPacket();
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
-
-                // Обновляем курсор
                 updateCursor(state, newYaw, newPitch);
 
-                // Сохраняем текущий поворот в state
-                state.currentYaw = newYaw;
-                state.currentPitch = newPitch;
-
-                // Подменяем позицию на замороженную
+                // Подменяем только XYZ, yaw/pitch оставляем
                 pkt.getDoubles().write(0, state.frozenLocation.getX());
                 pkt.getDoubles().write(1, state.frozenLocation.getY());
                 pkt.getDoubles().write(2, state.frozenLocation.getZ());
             }
         });
 
+        // LOOK — только поворот, просто считываем
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.LOOK) {
             @Override
@@ -166,16 +165,11 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
                 PacketContainer pkt = event.getPacket();
                 float newYaw   = pkt.getFloat().read(0);
                 float newPitch = pkt.getFloat().read(1);
-
-                // Обновляем курсор
                 updateCursor(state, newYaw, newPitch);
-
-                // Сохраняем текущий поворот
-                state.currentYaw = newYaw;
-                state.currentPitch = newPitch;
             }
         });
 
+        // Блокируем прыжок
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ENTITY_ACTION) {
             @Override
@@ -187,6 +181,7 @@ public class MainMenuPlugin extends JavaPlugin implements Listener {
             }
         });
 
+        // Левый клик
         pm.addPacketListener(new PacketAdapter(this,
                 PacketType.Play.Client.ARM_ANIMATION) {
             @Override
